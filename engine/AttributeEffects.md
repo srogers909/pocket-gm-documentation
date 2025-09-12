@@ -57,12 +57,13 @@ Position attributes: `Rush Power`, `Rush Speed`, `Evasion`
 - **Impact**: Enables explosive plays and outside running success
 
 #### Evasion
-- **Effect**: Ability to break tackles and create additional yardage
+- **Effect**: Ability to break tackles, avoid defenders, and create additional yardage after contact
 - **Usage**:
-  - Inside runs: Combined with power for balanced approach
-  - Breakaway potential: Combined with speed for explosive plays
+  - Inside runs: Combined with power `(rbPower + rbEvasion - 100) / 50.0` for balanced approach
+  - Breakaway potential: Combined with speed `(rbSpeed + rbEvasion - 100) / 200.0` for explosive plays
+  - Position-specific assignment: Only QB and RB positions receive evasion values equal to their positionRating3, all other positions get 0
 - **Range**: 0-100, where 50 is average
-- **Impact**: Increases big play probability and yards after contact
+- **Impact**: Increases big play probability, yards after contact, and enables RBs to create yardage even when initial blocking fails
 
 ### Wide Receiver (WR)
 Position attributes: `Speed`, `Catching`, `Route Running`
@@ -131,10 +132,13 @@ Position attributes: `Pass Blocking`, `Run Blocking`, `Strength`
 - **Impact**: Foundation of all running play success
 
 #### Strength
-- **Effect**: Physical power in blocking assignments
-- **Usage**: Currently defined but not implemented in calculations
+- **Effect**: Physical power in blocking assignments and line battles
+- **Usage**: 
+  - Pass blocking: `(avgOLStrength - 50) / 4.0` modifier to pass protection (±12.5 point range)
+  - Run blocking: `(avgOLStrength - 50) / 3.0` modifier to run blocking (±16.7 point range)
+  - Combined with Pass/Run Blocking ratings to determine final offensive line effectiveness
 - **Range**: 0-100, where 50 is average
-- **Impact**: Reserved for future physical battle implementations
+- **Impact**: Provides significant bonus/penalty to blocking effectiveness, with greater impact on run blocking than pass blocking
 
 ### Defensive Line (DE, DT, NT, DL)
 Position attributes: `Pass Rush`, `Run Defense`, `Strength`
@@ -156,10 +160,14 @@ Position attributes: `Pass Rush`, `Run Defense`, `Strength`
 - **Impact**: Primary factor in limiting rushing success
 
 #### Strength
-- **Effect**: Physical battles with offensive linemen
-- **Usage**: Not yet implemented in current calculations
+- **Effect**: Physical power in line battles against offensive linemen
+- **Usage**: 
+  - Pass rush: `(avgDLStrength - 50) / 4.0` modifier to pass rush rating (±12.5 point range)
+  - Run defense: `(avgDLStrength - 50) / 3.0` modifier to run defense rating (±16.7 point range)
+  - Combined with Pass Rush/Run Defense ratings to determine final defensive line effectiveness
+  - Only defensive linemen (DE, DT, NT, DL) contribute to strength calculations, not linebackers
 - **Range**: 0-100, where 50 is average
-- **Impact**: Reserved for future line battle mechanics
+- **Impact**: Provides significant bonus/penalty to defensive effectiveness, with greater impact on run defense than pass rush, directly opposing offensive line strength bonuses
 
 ### Linebacker (LB, ILB, MLB, OLB)
 Position attributes: `Tackling`, `Coverage`, `Speed`
@@ -275,10 +283,15 @@ Position attributes: `Punt Power`, `Punt Accuracy`, `Pressure Resistance`
 - **Impact**: Reduces return opportunities
 
 #### Pressure Resistance
-- **Effect**: Performance under pass rush pressure
-- **Usage**: Not yet implemented in current calculations
+- **Effect**: Performance under defensive pressure during punt situations
+- **Usage**: 
+  - Pressure situation detection: Based on quarter ≥ 4, field position < 25 yards, or 4th down
+  - Defensive pressure calculation: Uses defensive line rating + situational modifiers
+  - Blocked punt probability: `max(0.05, min(0.30, (defensivePressure - 50) / 300.0))` modified by pressure resistance
+  - Distance consistency: Higher pressure resistance maintains more consistent punt distances under pressure
+  - Applied in `_simulatePunt` method when pressure situations are detected
 - **Range**: 0-100, where 50 is average
-- **Impact**: Reserved for rush defense on punts
+- **Impact**: Reduces blocked punt chance and maintains performance consistency in high-pressure situations. Elite punters (87+ rating) show measurably better distance consistency and lower block rates compared to average punters (62 rating) especially in extreme pressure scenarios.
 
 ### Long Snapper (LS)
 Position attributes: `Snap Accuracy`, `Snap Speed`, `Blocking`
@@ -331,11 +344,29 @@ Staff attributes: `passingOffense`, `rushingOffense`, `playCalling`
 ### Defensive Coordinator
 Staff attributes: `runDefense`, `passDefense`, `playCalling`
 
-#### Run Defense / Pass Defense / Play Calling
-- **Effect**: Currently defined but not implemented
-- **Usage**: Reserved for future defensive coordinator influence
+#### Run Defense (rushingDefense)
+- **Effect**: Penalty to rushing play outcomes - acts as negative modifier on offensive rushing success
+- **Usage**: 
+  - Yards penalty: `-(rushingDefense + defensivePlayCalling - 100) / 400.0 * yardsGained` applied to rushing plays
+  - Combined with playCalling for enhanced defensive effectiveness
+  - Only applied in EnhancedPlaySimulator through `_applyStaffInfluence` method
 - **Range**: 0-100, where 50 is average
-- **Impact**: Will provide defensive bonuses when implemented
+- **Impact**: Reduces rushing yards allowed - higher values make rushing attacks less effective
+
+#### Pass Defense (passingDefense)
+- **Effect**: Penalty to passing play outcomes - acts as negative modifier on offensive passing success
+- **Usage**:
+  - Yards penalty: `-(passingDefense + defensivePlayCalling - 100) / 400.0 * yardsGained` applied to passing plays
+  - Combined with playCalling for enhanced defensive effectiveness
+  - Only applied in EnhancedPlaySimulator through `_applyStaffInfluence` method
+- **Range**: 0-100, where 50 is average
+- **Impact**: Reduces passing yards allowed - higher values make passing attacks less effective
+
+#### Defensive Play Calling (defensivePlayCalling)
+- **Effect**: Enhances both pass defense and run defense effectiveness
+- **Usage**: Combined with specific defense ratings (passingDefense/rushingDefense) in penalty calculations
+- **Range**: 0-100, where 50 is average
+- **Impact**: Multiplier effect on defensive coordinator effectiveness - amplifies both pass and run defense capabilities
 
 ### Head Coach
 Staff attributes: `playCalling`, `playerDevelopment`, `motivation`
@@ -415,6 +446,21 @@ Accuracy bonus: (75-50)/150 = +16.7%
 Consistency bonus: (70-50)/200 = +10%
 
 Total success rate: 85% + 15% + 16.7% + 10% = 126.7% → capped at 98%
+```
+
+### Example 5: Defensive Coordinator Impact
+```
+Offensive pass play gains 8 yards initially
+Defensive Coordinator (Pass Defense: 90, Defensive Play Calling: 85)
+
+DC penalty calculation: -(90 + 85 - 100) / 400.0 = -75/400 = -0.1875
+Yards penalty: -0.1875 * 8 = -1.5 yards
+Final yards gained: 8 - 1.5 = 6.5 yards
+
+Comparison scenarios:
+- Weak DC (Pass Defense: 30, Play Calling: 25): -(30+25-100)/400 = +0.1125 → +0.9 yards = 8.9 total
+- Average DC (Pass Defense: 50, Play Calling: 50): -(50+50-100)/400 = 0 → no change = 8.0 total  
+- Elite DC (Pass Defense: 95, Play Calling: 90): -(95+90-100)/400 = -0.2125 → -1.7 yards = 6.3 total
 ```
 
 ## Integration Points
